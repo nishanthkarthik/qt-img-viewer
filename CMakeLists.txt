@@ -1,11 +1,10 @@
 cmake_minimum_required(VERSION 3.28)
-project(typst_svg_viewer)
+project(qt-img-viewer)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
-
 
 find_package(Qt6 COMPONENTS
         Core
@@ -13,8 +12,8 @@ find_package(Qt6 COMPONENTS
         SvgWidgets
         REQUIRED)
 
-add_executable(typst_svg_viewer main.cpp)
-target_link_libraries(typst_svg_viewer
+add_executable(img-viewer main.cpp)
+target_link_libraries(img-viewer
         Qt::Core
         Qt::Widgets
         Qt::SvgWidgets

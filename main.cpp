@@ -33,11 +33,22 @@ int main(int argc, char *argv[]) {
     };
 
     static int fileCount = 0;
-    static QVector<QGraphicsPixmapItem *> pixMaps;
+
+    struct ImgState {
+        QGraphicsPixmapItem *pixmap;
+        QString file;
+
+        void refresh(QGraphicsView *view) const {
+            pixmap->setPixmap(file);
+            view->invalidateScene(pixmap->boundingRect());
+        }
+    };
+
+    static QVector<ImgState> states;
 
     auto *watcher = new QFileSystemWatcher(window);
     watcher->addPath(root.absolutePath());
-    QWidget::connect(watcher, &QFileSystemWatcher::directoryChanged, [=](const QString &path) {
+    const auto refreshWatchlist = [=](const QString &path) {
         int fileIdx = 1;
         QStringList validFiles;
         while ([&] {
@@ -57,26 +68,27 @@ int main(int argc, char *argv[]) {
 
         watcher->addPaths(validFiles);
 
-        for (qsizetype c = pixMaps.size(); c < fileCount; ++c) {
-            auto *item = new QGraphicsPixmapItem(makeFilename(c + 1));
+        for (qsizetype c = states.size(); c < fileCount; ++c) {
+            const auto fileName = makeFilename(c + 1);
+            auto *item = new QGraphicsPixmapItem(fileName);
             item->setTransformationMode(Qt::SmoothTransformation);
             auto offset = QPointF(0, 10);
-            if (!pixMaps.empty()) {
-                offset += pixMaps.last()->boundingRect().bottomLeft();
+            if (!states.empty()) {
+                offset += states.last().pixmap->boundingRect().bottomLeft();
             }
             item->setOffset(offset);
             qInfo(cat) << "Adding file " << c << " with offset " << item->boundingRect().bottomLeft();
-            pixMaps.append(item);
+            states.append(ImgState{item, fileName});
             scene->addItem(item);
         }
-    });
+    };
+    QWidget::connect(watcher, &QFileSystemWatcher::directoryChanged, refreshWatchlist);
 
     QWidget::connect(watcher, &QFileSystemWatcher::fileChanged, [=](const QString &path) {
         for (qsizetype i = 1; i <= fileCount; ++i) {
             if (QFileInfo(path).absoluteFilePath() == QFileInfo(makeFilename(i)).absoluteFilePath()) {
                 qInfo(cat) << "Reloading image " << i;
-                pixMaps[i - 1]->setPixmap(path);
-                view->invalidateScene(pixMaps[i - 1]->boundingRect());
+                states[i - 1].refresh(view);
             }
         }
     });
@@ -103,5 +115,6 @@ int main(int argc, char *argv[]) {
     window->addAction(quit);
     window->setCentralWidget(view);
     window->show();
+    refreshWatchlist(root.path());
     return QCoreApplication::exec();
 }
