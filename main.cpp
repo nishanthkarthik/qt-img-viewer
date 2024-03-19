@@ -1,13 +1,14 @@
 #include <QApplication>
-#include <QtWidgets/QMainWindow>
-#include <QGraphicsView>
-#include <QGraphicsPixmapItem>
-#include <QFileSystemWatcher>
-#include <QFileInfo>
-#include <QScrollBar>
+#include <QCryptographicHash>
 #include <QDir>
-#include <QtLogging>
+#include <QFileInfo>
+#include <QFileSystemWatcher>
+#include <QGraphicsPixmapItem>
+#include <QGraphicsView>
 #include <QLoggingCategory>
+#include <QScrollBar>
+#include <QtLogging>
+#include <QtWidgets/QMainWindow>
 
 namespace {
     const auto cat = QLoggingCategory("img-viewer");
@@ -35,13 +36,50 @@ int main(int argc, char *argv[]) {
     static int fileCount = 0;
 
     struct ImgState {
-        QGraphicsPixmapItem *pixmap;
-        QString file;
-
-        void refresh(QGraphicsView *view) const {
-            pixmap->setPixmap(file);
-            view->invalidateScene(pixmap->boundingRect());
+    public:
+        explicit ImgState(qsizetype idx, QGraphicsPixmapItem *item, QString file)
+                : m_idx{idx}, m_pixMap{item},
+                  m_file{std::move(file)} {
+            qInfo(cat) << "Adding file " << idx << " with offset " << item->boundingRect().bottomLeft();
         }
+
+        void refresh(QGraphicsView *view) {
+            qInfo(cat) << "Refreshing" << m_idx;
+
+            auto file = QFile(m_file);
+            if (!file.open(QIODevice::OpenModeFlag::ReadOnly)) return;
+            const auto bytes = file.readAll();
+
+            if (bytes.size() <= 16) {
+                qInfo(cat) << "Skipping file re-render: Empty file";
+                return;
+            }
+
+            if (bytes.sliced(bytes.size() - 8, 4) != QByteArrayLiteral("\x49\x45\x4E\x44")) {
+                qInfo(cat) << "Skipping file re-render: Missing IEND footer";
+                return;
+            }
+
+            const auto newHash = QCryptographicHash::hash(bytes, QCryptographicHash::Algorithm::Sha1);
+            if (newHash == m_hash) {
+                qInfo(cat) << "Skipping image update for" << m_idx;
+                return;
+            }
+            qInfo(cat) << "Performing image update for" << m_idx;
+            m_pixMap->setPixmap(m_file);
+            view->invalidateScene(m_pixMap->boundingRect());
+            m_hash = newHash;
+        }
+
+        [[nodiscard]] QRectF boundingRect() const {
+            return m_pixMap->boundingRect();
+        }
+
+    private:
+        qsizetype m_idx;
+        QGraphicsPixmapItem *m_pixMap;
+        QString m_file;
+        QByteArray m_hash;
     };
 
     static QVector<ImgState> states;
@@ -74,11 +112,10 @@ int main(int argc, char *argv[]) {
             item->setTransformationMode(Qt::SmoothTransformation);
             auto offset = QPointF(0, 10);
             if (!states.empty()) {
-                offset += states.last().pixmap->boundingRect().bottomLeft();
+                offset += states.last().boundingRect().bottomLeft();
             }
             item->setOffset(offset);
-            qInfo(cat) << "Adding file " << c << " with offset " << item->boundingRect().bottomLeft();
-            states.append(ImgState{item, fileName});
+            states.append(ImgState{c + 1, item, fileName});
             scene->addItem(item);
         }
     };
@@ -87,7 +124,6 @@ int main(int argc, char *argv[]) {
     QWidget::connect(watcher, &QFileSystemWatcher::fileChanged, [=](const QString &path) {
         for (qsizetype i = 1; i <= fileCount; ++i) {
             if (QFileInfo(path).absoluteFilePath() == QFileInfo(makeFilename(i)).absoluteFilePath()) {
-                qInfo(cat) << "Reloading image " << i;
                 states[i - 1].refresh(view);
             }
         }
