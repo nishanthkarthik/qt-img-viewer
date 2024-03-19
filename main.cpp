@@ -12,6 +12,25 @@
 
 namespace {
     const auto cat = QLoggingCategory("img-viewer");
+
+    template<typename Fn>
+    class Defer {
+    public:
+        explicit Defer(Fn fn) : m_fn(std::move(fn)) {}
+
+        Defer(const Defer &) = delete;
+
+        Defer(Defer &&) = delete;
+
+        Defer &operator=(const Defer &) = delete;
+
+        Defer &operator=(Defer &&) = delete;
+
+        ~Defer() noexcept(false) { m_fn(); }
+
+    private:
+        Fn m_fn;
+    };
 }
 
 int main(int argc, char *argv[]) {
@@ -49,25 +68,27 @@ int main(int argc, char *argv[]) {
             auto file = QFile(m_file);
             if (!file.open(QIODevice::OpenModeFlag::ReadOnly)) return;
 
-            file.size();
+            const auto size = file.size();
 
-            if (file.size() <= 16) {
+            if (size <= 16) {
                 qInfo(cat) << "Skipping file re-render: Empty file";
                 return;
             }
 
-            file.seek(file.size() - 8);
+            {
+                const auto seekBack = Defer{[&] { file.seek(0); }};
+                file.seek(size - 8);
 
-            if (file.read(4) != QByteArrayLiteral("\x49\x45\x4E\x44")) {
-                qInfo(cat) << "Skipping file re-render: Missing IEND footer";
-                return;
+                if (file.read(4) != QByteArrayLiteral("\x49\x45\x4E\x44")) {
+                    qInfo(cat) << "Skipping file re-render: Missing IEND footer";
+                    return;
+                }
             }
 
-            file.seek(0);
-
-            const auto bytes = file.readAll();
-
-            const auto newHash = QCryptographicHash::hash(bytes, QCryptographicHash::Algorithm::Sha1);
+            const auto bytesPtr = file.map(0, size);
+            const auto unmapFn = Defer{[&]{ file.unmap(bytesPtr); }};
+            const auto newHash = QCryptographicHash::hash(QByteArrayView(bytesPtr, size),
+                                                          QCryptographicHash::Algorithm::Sha1);
             if (newHash == m_hash) {
                 qInfo(cat) << "Skipping image update for" << m_idx;
                 return;

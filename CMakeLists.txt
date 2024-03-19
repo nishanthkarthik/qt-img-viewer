@@ -9,13 +9,10 @@ set(CMAKE_AUTOUIC ON)
 find_package(Qt6 COMPONENTS
         Core
         Widgets
-        SvgWidgets
         REQUIRED)
 
 add_executable(img-viewer main.cpp)
 target_link_libraries(img-viewer
         Qt::Core
         Qt::Widgets
-        Qt::SvgWidgets
 )
-
