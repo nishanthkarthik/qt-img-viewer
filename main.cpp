@@ -48,17 +48,24 @@ int main(int argc, char *argv[]) {
 
             auto file = QFile(m_file);
             if (!file.open(QIODevice::OpenModeFlag::ReadOnly)) return;
-            const auto bytes = file.readAll();
 
-            if (bytes.size() <= 16) {
+            file.size();
+
+            if (file.size() <= 16) {
                 qInfo(cat) << "Skipping file re-render: Empty file";
                 return;
             }
 
-            if (bytes.sliced(bytes.size() - 8, 4) != QByteArrayLiteral("\x49\x45\x4E\x44")) {
+            file.seek(file.size() - 8);
+
+            if (file.read(4) != QByteArrayLiteral("\x49\x45\x4E\x44")) {
                 qInfo(cat) << "Skipping file re-render: Missing IEND footer";
                 return;
             }
+
+            file.seek(0);
+
+            const auto bytes = file.readAll();
 
             const auto newHash = QCryptographicHash::hash(bytes, QCryptographicHash::Algorithm::Sha1);
             if (newHash == m_hash) {
@@ -67,8 +74,10 @@ int main(int argc, char *argv[]) {
             }
             qInfo(cat) << "Performing image update for" << m_idx;
             m_pixMap->setPixmap(m_file);
+            qInfo(cat) << "Invalidating scene" << m_idx;
             view->invalidateScene(m_pixMap->boundingRect());
             m_hash = newHash;
+            qInfo(cat) << "Update finished" << m_idx;
         }
 
         [[nodiscard]] QRectF boundingRect() const {
