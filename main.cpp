@@ -34,9 +34,11 @@ namespace {
         Fn m_fn;
     };
 
-    void load_wuffs_image(uint8_t *ptr, size_t len, size_t w, size_t h) {
-        wuffs_base__io_buffer buffer{wuffs_base__slice_u8{ptr, len},
-                                     wuffs_base__io_buffer_meta{w, h, 0, true}};
+    wuffs_aux::DecodeImageResult load_wuffs_image(uint8_t *ptr, size_t len) {
+        wuffs_aux::DecodeImageCallbacks callbacks;
+        wuffs_aux::sync_io::MemoryInput input(ptr, len);
+        wuffs_aux::DecodeImageResult result = wuffs_aux::DecodeImage(callbacks, input);
+        return result;
     }
 }
 
@@ -52,33 +54,49 @@ int main(int argc, char *argv[]) {
     view->setDragMode(QGraphicsView::DragMode::ScrollHandDrag);
 
     const auto pattern = QFileInfo(QCoreApplication::arguments().at(1));
-    const auto root = pattern.dir();
-    const auto filePattern = pattern.fileName();
 
+    static auto root = pattern.dir();
+    static auto filePattern = pattern.fileName();
     static int fileCount = 0;
+    static int width = 1;
 
-    const auto makeFilename = [=](qsizetype idx) {
-        const auto width = QCoreApplication::arguments().at(2).toInt();
+    static const auto makeFilename = [](size_t idx) {
         return root.filePath(QString(filePattern)
                                      .replace(QStringLiteral("{n}"),
                                               QStringLiteral("%1").arg(idx,
                                                                        width,
                                                                        10,
-                                                                       QLatin1Char('0'))));
+                                                                       QChar('0'))));
     };
 
     struct ImgState {
     public:
-        explicit ImgState(qsizetype idx, QGraphicsPixmapItem *item, QString file)
-                : m_idx{idx}, m_pixMap{item},
-                  m_file{std::move(file)} {
+        explicit ImgState(size_t idx, QGraphicsPixmapItem *item)
+                : m_idx{idx}, m_pixMap{item}, m_store("Empty") {
             qInfo(cat) << "Adding file " << idx << " with offset " << item->boundingRect().bottomLeft();
+        }
+
+        void fetch(uchar *bytesPtr, size_t size) {
+            qInfo(cat) << "Performing image update for" << m_idx;
+            m_store = load_wuffs_image(bytesPtr, size);
+            auto plane = m_store.pixbuf.plane(0);
+            m_pixMap->setPixmap(
+                    QPixmap::fromImage(QImage(plane.ptr, plane.width / 4, plane.height, QImage::Format_RGBA8888)));
+            qInfo(cat) << "Loaded image";
+        }
+
+        void fetch() {
+            auto file = QFile(fileName());
+            file.open(QIODeviceBase::OpenModeFlag::ReadOnly);
+            auto bytesPtr = file.map(0, file.size());
+            const auto unmapFn = Defer{[&] { file.unmap(bytesPtr); }};
+            fetch(bytesPtr, file.size());
         }
 
         void refresh(QGraphicsView *view) {
             qInfo(cat) << "Refreshing" << m_idx;
 
-            auto file = QFile(m_file);
+            auto file = QFile(fileName());
             if (!file.open(QIODevice::OpenModeFlag::ReadOnly)) return;
 
             const auto size = file.size();
@@ -106,10 +124,12 @@ int main(int argc, char *argv[]) {
                 qInfo(cat) << "Skipping image update for" << m_idx;
                 return;
             }
-            qInfo(cat) << "Performing image update for" << m_idx;
-            m_pixMap->setPixmap(m_file);
+
+            fetch(bytesPtr, size);
+
             qInfo(cat) << "Invalidating scene" << m_idx;
             view->invalidateScene(m_pixMap->boundingRect());
+
             m_hash = newHash;
             qInfo(cat) << "Update finished" << m_idx;
         }
@@ -118,18 +138,28 @@ int main(int argc, char *argv[]) {
             return m_pixMap->boundingRect();
         }
 
+        [[nodiscard]] QString fileName() const {
+            return makeFilename(m_idx);
+        }
+
     private:
-        qsizetype m_idx;
+        size_t m_idx;
         QGraphicsPixmapItem *m_pixMap;
-        QString m_file;
         QByteArray m_hash;
+        wuffs_aux::DecodeImageResult m_store;
     };
 
-    static QVector<ImgState> states;
+    static std::vector<ImgState> states;
 
     auto *watcher = new QFileSystemWatcher(window);
     watcher->addPath(root.absolutePath());
     const auto refreshWatchlist = [=](const QString &path) {
+        while (!QFileInfo::exists(makeFilename(1))) {
+            ++width;
+        }
+
+        qInfo(cat) << "Detected padding with width" << width;
+
         int fileIdx = 1;
         QStringList validFiles;
         while ([&] {
@@ -149,16 +179,17 @@ int main(int argc, char *argv[]) {
 
         watcher->addPaths(validFiles);
 
-        for (qsizetype c = states.size(); c < fileCount; ++c) {
-            const auto fileName = makeFilename(c + 1);
-            auto *item = new QGraphicsPixmapItem(fileName);
+        for (size_t c = states.size(); c < fileCount; ++c) {
+            auto *item = new QGraphicsPixmapItem();
             item->setTransformationMode(Qt::SmoothTransformation);
             auto offset = QPointF(0, 10);
             if (!states.empty()) {
-                offset += states.last().boundingRect().bottomLeft();
+                offset += states.at(states.size() - 1).boundingRect().bottomLeft();
             }
             item->setOffset(offset);
-            states.append(ImgState{c + 1, item, fileName});
+            auto state = ImgState{c + 1, item};
+            state.fetch();
+            states.emplace_back(std::move(state));
             scene->addItem(item);
         }
     };

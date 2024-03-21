@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.28)
 project(qt-img-viewer)
 
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -11,7 +13,7 @@ find_package(Qt6 COMPONENTS
         Widgets
         REQUIRED)
 
-add_library(wuffs SHARED wuffs-unsupported-snapshot.cc)
+add_library(wuffs wuffs-unsupported-snapshot.cc)
 target_compile_definitions(wuffs PRIVATE WUFFS_IMPLEMENTATION)
 
 add_executable(img-viewer main.cpp)
