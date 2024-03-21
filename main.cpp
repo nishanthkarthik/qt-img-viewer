@@ -128,7 +128,7 @@ int main(int argc, char *argv[]) {
             fetch(bytesPtr, size);
 
             qInfo(cat) << "Invalidating scene" << m_idx;
-            view->invalidateScene(m_pixMap->boundingRect());
+            view->invalidateScene(m_pixMap->boundingRect(), QGraphicsScene::ItemLayer);
 
             m_hash = newHash;
             qInfo(cat) << "Update finished" << m_idx;
