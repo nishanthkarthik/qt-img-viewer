@@ -11,8 +11,12 @@ find_package(Qt6 COMPONENTS
         Widgets
         REQUIRED)
 
+add_library(wuffs SHARED wuffs-unsupported-snapshot.cc)
+target_compile_definitions(wuffs PRIVATE WUFFS_IMPLEMENTATION)
+
 add_executable(img-viewer main.cpp)
 target_link_libraries(img-viewer
         Qt::Core
         Qt::Widgets
+        wuffs
 )

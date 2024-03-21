@@ -10,6 +10,8 @@
 #include <QtLogging>
 #include <QtWidgets/QMainWindow>
 
+#include "wuffs-unsupported-snapshot.cc"
+
 namespace {
     const auto cat = QLoggingCategory("img-viewer");
 
@@ -31,6 +33,11 @@ namespace {
     private:
         Fn m_fn;
     };
+
+    void load_wuffs_image(uint8_t *ptr, size_t len, size_t w, size_t h) {
+        wuffs_base__io_buffer buffer{wuffs_base__slice_u8{ptr, len},
+                                     wuffs_base__io_buffer_meta{w, h, 0, true}};
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -48,11 +55,17 @@ int main(int argc, char *argv[]) {
     const auto root = pattern.dir();
     const auto filePattern = pattern.fileName();
 
-    const auto makeFilename = [=](qsizetype idx) {
-        return root.filePath(QString(filePattern).replace(QStringLiteral("{n}"), QString::number(idx)));
-    };
-
     static int fileCount = 0;
+
+    const auto makeFilename = [=](qsizetype idx) {
+        const auto width = QCoreApplication::arguments().at(2).toInt();
+        return root.filePath(QString(filePattern)
+                                     .replace(QStringLiteral("{n}"),
+                                              QStringLiteral("%1").arg(idx,
+                                                                       width,
+                                                                       10,
+                                                                       QLatin1Char('0'))));
+    };
 
     struct ImgState {
     public:
@@ -86,7 +99,7 @@ int main(int argc, char *argv[]) {
             }
 
             const auto bytesPtr = file.map(0, size);
-            const auto unmapFn = Defer{[&]{ file.unmap(bytesPtr); }};
+            const auto unmapFn = Defer{[&] { file.unmap(bytesPtr); }};
             const auto newHash = QCryptographicHash::hash(QByteArrayView(bytesPtr, size),
                                                           QCryptographicHash::Algorithm::Sha1);
             if (newHash == m_hash) {
