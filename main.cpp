@@ -57,8 +57,8 @@ int main(int argc, char *argv[]) {
 
     static auto root = pattern.dir();
     static auto filePattern = pattern.fileName();
-    static int fileCount = 0;
-    static int width = 1;
+    static size_t fileCount = 0;
+    static size_t width = 1;
 
     static const auto makeFilename = [](size_t idx) {
         return root.filePath(QString(filePattern)
@@ -76,12 +76,22 @@ int main(int argc, char *argv[]) {
             qInfo(cat) << "Adding file " << idx << " with offset " << item->boundingRect().bottomLeft();
         }
 
+        QPixmap mapPixels() {
+            auto plane = m_store.pixbuf.plane(0);
+            return QPixmap::fromImage(QImage(plane.ptr,
+                                             static_cast<int>(plane.width) / 4,
+                                             static_cast<int>(plane.height),
+                                             QImage::Format_RGBA8888));
+        }
+
+        void setVisible(bool visible) {
+            m_pixMap->setPixmap(visible ? mapPixels() : QPixmap());
+        }
+
         void fetch(uchar *bytesPtr, size_t size) {
             qInfo(cat) << "Performing image update for" << m_idx;
             m_store = load_wuffs_image(bytesPtr, size);
-            auto plane = m_store.pixbuf.plane(0);
-            m_pixMap->setPixmap(
-                    QPixmap::fromImage(QImage(plane.ptr, plane.width / 4, plane.height, QImage::Format_RGBA8888)));
+            m_pixMap->setPixmap(mapPixels());
             qInfo(cat) << "Loaded image";
         }
 
@@ -154,30 +164,32 @@ int main(int argc, char *argv[]) {
     auto *watcher = new QFileSystemWatcher(window);
     watcher->addPath(root.absolutePath());
     const auto refreshWatchlist = [=](const QString &path) {
-        while (!QFileInfo::exists(makeFilename(1))) {
-            ++width;
-        }
-
-        qInfo(cat) << "Detected padding with width" << width;
-
-        int fileIdx = 1;
-        QStringList validFiles;
-        while ([&] {
-            auto info = QFile(makeFilename(fileIdx));
-            if (info.exists()) { validFiles << info.fileName(); }
-            return info.exists();
-        }()) {
-            ++fileIdx;
-        }
-        fileCount = fileIdx - 1;
-
-        for (const auto &file: watcher->files()) {
-            if (!QFile(file).exists()) {
-                watcher->removePath(file);
+        std::optional<size_t> latestWidth;
+        std::map<size_t, QStringList> validFiles;
+        auto latestWidthChange = QDateTime::fromSecsSinceEpoch(0);
+        for (width = 1; width < 4; ++width) {
+            for (int fileIdx = 1; fileIdx < static_cast<int>(std::pow(10, width)); ++fileIdx) {
+                const auto name = makeFilename(fileIdx);
+                const auto info = QFileInfo(name);
+                if (!info.exists()) break;
+                validFiles[width] << name;
+                const auto thisChange = info.lastModified();
+                if (thisChange > latestWidthChange) {
+                    latestWidthChange = thisChange;
+                    latestWidth = width;
+                }
             }
         }
 
-        watcher->addPaths(validFiles);
+        width = latestWidth.value_or(1);
+
+        qInfo(cat) << "Detected latest first file" << makeFilename(1) << "with width" << width;
+        qInfo(cat) << "Existing files" << validFiles[width];
+
+        fileCount = validFiles[width].size();
+
+        watcher->removePaths(watcher->files());
+        watcher->addPaths(validFiles[width]);
 
         for (size_t c = states.size(); c < fileCount; ++c) {
             auto *item = new QGraphicsPixmapItem();
@@ -191,6 +203,10 @@ int main(int argc, char *argv[]) {
             state.fetch();
             states.emplace_back(std::move(state));
             scene->addItem(item);
+        }
+
+        for (size_t c = 0; c < states.size(); ++c) {
+            states[c].setVisible(c < fileCount);
         }
     };
     QWidget::connect(watcher, &QFileSystemWatcher::directoryChanged, refreshWatchlist);
@@ -219,8 +235,13 @@ int main(int argc, char *argv[]) {
     quit->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Q));
     QWidget::connect(quit, &QAction::triggered, window, &QMainWindow::close);
 
+    auto *reload = new QAction(window);
+    reload->setShortcut(QKeySequence(Qt::Key_R));
+    QWidget::connect(reload, &QAction::triggered, [&] { refreshWatchlist(root.path()); });
+
     view->addAction(zoomIn);
     view->addAction(zoomOut);
+    view->addAction(reload);
 
     window->addAction(quit);
     window->setCentralWidget(view);
