@@ -77,11 +77,20 @@ int main(int argc, char *argv[]) {
         }
 
         QPixmap mapPixels() {
+            const auto pixfmt = [&] {
+                switch (m_store.pixbuf.pixel_format().repr) {
+                    case WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL: return QImage::Format_ARGB32_Premultiplied;
+                    default: {
+                        qFatal(cat) << "Unknown pixfmt" << std::hex << m_store.pixbuf.pixel_format().repr;
+                        throw std::runtime_error{"unknown pixfmt"};
+                    }
+                }
+            }();
             auto plane = m_store.pixbuf.plane(0);
             return QPixmap::fromImage(QImage(plane.ptr,
                                              static_cast<int>(plane.width) / 4,
                                              static_cast<int>(plane.height),
-                                             QImage::Format_RGBA8888));
+                                             pixfmt));
         }
 
         void setVisible(bool visible) {
